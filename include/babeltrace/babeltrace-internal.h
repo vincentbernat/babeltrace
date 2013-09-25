@@ -195,5 +195,6 @@ extern int opt_all_field_names,
 
 extern uint64_t opt_clock_offset;
 extern uint64_t opt_clock_offset_ns;
+extern uint64_t opt_seek;
 
 #endif

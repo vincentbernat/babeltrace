@@ -99,6 +99,7 @@ enum {
 	OPT_CLOCK_DATE,
 	OPT_CLOCK_GMT,
 	OPT_CLOCK_FORCE_CORRELATE,
+	OPT_SEEK,
 };
 
 /*
@@ -128,6 +129,7 @@ static struct poptOption long_options[] = {
 	{ "clock-date", 0, POPT_ARG_NONE, NULL, OPT_CLOCK_DATE, NULL, NULL },
 	{ "clock-gmt", 0, POPT_ARG_NONE, NULL, OPT_CLOCK_GMT, NULL, NULL },
 	{ "clock-force-correlate", 0, POPT_ARG_NONE, NULL, OPT_CLOCK_FORCE_CORRELATE, NULL, NULL },
+	{ "seek", 0, POPT_ARG_STRING, NULL, OPT_SEEK, NULL, NULL },
 	{ NULL, 0, 0, NULL, 0, NULL, NULL },
 };
 
@@ -173,6 +175,8 @@ static void usage(FILE *fp)
 	fprintf(fp, "      --clock-gmt                Print clock in GMT time zone (default: local time zone)\n");
 	fprintf(fp, "      --clock-force-correlate    Assume that clocks are inherently correlated\n");
 	fprintf(fp, "                                 across traces.\n");
+	fprintf(fp, "      --seek                     Seek to the given position in seconds,\n");
+	fprintf(fp, "                                 relative to the beginning of the trace.\n");
 	list_formats(fp);
 	fprintf(fp, "\n");
 }
@@ -393,6 +397,29 @@ static int parse_options(int argc, char **argv)
 			opt_clock_force_correlate = 1;
 			break;
 
+		case OPT_SEEK:
+		{
+			char *str;
+			char *endptr;
+
+			str = (char *) poptGetOptArg(pc);
+			if (!str) {
+				fprintf(stderr, "[error] Missing --seek argument\n");
+				ret = -EINVAL;
+				goto end;
+			}
+			errno = 0;
+			opt_seek = strtoull(str, &endptr, 0);
+			if (*endptr != '\0' || str == endptr || errno != 0) {
+				fprintf(stderr, "[error] Incorrect --seek argument: %s\n", str);
+				ret = -EINVAL;
+				free(str);
+				goto end;
+			}
+			free(str);
+			break;
+		}
+
 		default:
 			ret = -EINVAL;
 			goto end;
@@ -609,6 +636,7 @@ int convert_trace(struct bt_trace_descriptor *td_write,
 	struct bt_ctf_iter *iter;
 	struct ctf_text_stream_pos *sout;
 	struct bt_iter_pos begin_pos;
+	struct bt_iter_pos seek_pos;
 	struct bt_ctf_event *ctf_event;
 	int ret;
 
@@ -623,6 +651,27 @@ int convert_trace(struct bt_trace_descriptor *td_write,
 	if (!iter) {
 		ret = -1;
 		goto error_iter;
+	}
+	if (opt_seek > 0) {
+		/* Read the first event to be able to seek. */
+		ctf_event = bt_ctf_iter_read_event(iter);
+		if (!ctf_event) {
+			ret = -1;
+			goto error_iter;
+		}
+		if (!ctf_event->parent->stream->has_timestamp) {
+			fprintf(stderr, "[error] Unable to seek to %" PRIu64 ". No timestamp.\n",
+				opt_seek);
+			goto end;
+		}
+		seek_pos.type = BT_SEEK_TIME;
+		seek_pos.u.seek_time = opt_seek*1000*1000*1000 + bt_ctf_get_timestamp(ctf_event);
+		ret = bt_iter_set_pos(bt_ctf_get_iter(iter), &seek_pos);
+		if (ret) {
+			fprintf(stderr, "[error] Unable to seek to %" PRIu64 ".\n",
+				opt_seek);
+			goto end;
+		}
 	}
 	while ((ctf_event = bt_ctf_iter_read_event(iter))) {
 		ret = sout->parent.event_cb(&sout->parent, ctf_event->parent->stream);

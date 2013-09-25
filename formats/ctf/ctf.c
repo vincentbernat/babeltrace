@@ -78,6 +78,7 @@ int opt_clock_cycles,
 
 uint64_t opt_clock_offset;
 uint64_t opt_clock_offset_ns;
+uint64_t opt_seek;
 
 extern int yydebug;
 
